@@ -17,8 +17,7 @@
 /* Diagnostics contain API names/error codes only, never clipboard bytes. */
 static void imageError(const char *operation, unsigned long error)
 {
-    if (GetEnvironmentVariableA("VCXSRV_TEST_VERBOSE", NULL, 0))
-        fprintf(stderr, "clipboard image: %s failed (0x%08lx)\n", operation, error);
+    fprintf(stderr, "clipboard image: %s failed (0x%08lx)\n", operation, error);
 }
 
 static UINT
@@ -78,7 +77,7 @@ bitmapPNG(HBITMAP source, size_t *size)
     CHECK(IWICBitmap_GetSize(bitmap, &width, &height));
     if (!width || !height || (unsigned long long)width * height >
         WIN_CLIPBOARD_IMAGE_LIMIT / 4u)
-        goto done;
+        { imageError("WIC dimensions", 0); goto done; }
     CHECK(CreateStreamOnHGlobal(NULL, TRUE, &stream));
     CHECK(IWICImagingFactory_CreateEncoder(factory, &GUID_ContainerFormatPng,
                                           NULL, &encoder));
@@ -92,11 +91,11 @@ bitmapPNG(HBITMAP source, size_t *size)
     CHECK(IWICBitmapEncoder_Commit(encoder));
     CHECK(IStream_Stat(stream, &stat, STATFLAG_NONAME));
     if (!stat.cbSize.QuadPart || stat.cbSize.QuadPart > WIN_CLIPBOARD_IMAGE_LIMIT)
-        goto done;
+        { imageError("encoded size", (unsigned long)stat.cbSize.QuadPart); goto done; }
     CHECK(GetHGlobalFromStream(stream, &memory));
     bytes = GlobalLock(memory);
     if (!bytes)
-        goto done;
+        { imageError("GlobalLock", GetLastError()); goto done; }
     result = malloc((size_t)stat.cbSize.QuadPart);
     if (result) {
         *size = (size_t)stat.cbSize.QuadPart;

@@ -44,6 +44,19 @@ The same tests also compile with Cygwin GCC; link the native image test against
 point `DISPLAY`/`XAUTHORITY` at an isolated, authenticated X server with clipboard
 integration disabled. The transport test does not access any desktop clipboard.
 
+The Windows integration target links the actual clipboard library and uses a
+real X server. It checks bitmap-only, registered PNG, mixed Unicode text/image,
+large INCR transfers, and empty clipboard, decoding and comparing bitmap pixels.
+Its default mode requires a private Windows window station and exits with code
+77 if Windows denies that isolation. It must not fall back to the user's clipboard.
+The `--ci-clipboard` mode requires `GITHUB_ACTIONS=true` and is intended only for
+a disposable CI runner. Do not set that environment variable to bypass isolation
+on a personal desktop.
+
+An explicitly requested manual test may use `--serve-current-clipboard` to run
+the bridge without writing synthetic fixtures. Use an isolated authenticated X
+display: the bridge itself retains the normal bidirectional text clipboard behavior.
+
 ## End-to-end acceptance (separate from unit/protocol tests)
 
 1. Start a build containing this change with clipboard integration enabled and
@@ -63,6 +76,7 @@ integration disabled. The transport test does not access any desktop clipboard.
    processes retain their old environment and cannot be repaired by updating
    tmux's session environment alone.
 
-CI covers native conversion and X11 protocol behavior. Full-server compilation,
-interactive Windows clipboard integration, SSH and Codex acceptance must be
-recorded separately in the pull request.
+CI jobs cover native conversion, X11 protocol behavior, and the integrated
+Windows clipboard library. Record their actual results in the pull request.
+Full-server compilation, interactive desktop acceptance, SSH and Codex acceptance
+remain separate checks.
