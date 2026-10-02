@@ -25,7 +25,12 @@ static xcb_connection_t *client;
 static xcb_window_t requestor;
 static xcb_atom_t clipboard, png, targets, utf8, prop, incr;
 
-void winDebug(const char *format, ...) { (void)format; }
+void winDebug(const char *format, ...)
+{
+    if (getenv("VCXSRV_TEST_VERBOSE")) {
+        va_list ap; va_start(ap,format); vfprintf(stderr,format,ap); va_end(ap);
+    }
+}
 void ErrorF(const char *format, ...)
 {
     va_list ap; va_start(ap,format); vfprintf(stderr,format,ap); va_end(ap);
@@ -69,6 +74,8 @@ static unsigned char *fetch(xcb_atom_t target, size_t *size)
         if(!event) { Sleep(1); continue; }
         if((event->response_type&127)==XCB_SELECTION_NOTIFY) {
             xcb_selection_notify_event_t *n=(void *)event;
+            if (n->property != prop)
+                fprintf(stderr, "Selection refused: target=%u PNG=%u TARGETS=%u UTF8=%u\n", target,png,targets,utf8);
             assert(n->property==prop); notified=1;
         } else if((event->response_type&127)==XCB_PROPERTY_NOTIFY) {
             xcb_property_notify_event_t *p=(void *)event;
@@ -224,15 +231,19 @@ int main(int argc, char **argv)
     /* Wait for the listener to initialize before setting the first fixture. */
     { uint64_t end=GetTickCount64()+5000; while(!g_fClipboardStarted && GetTickCount64()<end)Sleep(1); }
     assert(g_fClipboardStarted);
+    fprintf(stderr,"STAGE: bitmap-only\n");
     setDIB(owner,3,2); assert(hasTarget(png) && !hasTarget(utf8));
     small=fetch(png,&smallSize); assert(smallSize>8);
     verifyPNG(small,smallSize,3,2);
     out=fopen("build-tests/integration-small.png","wb"); assert(out);
     assert(fwrite(small,1,smallSize,out)==smallSize); fclose(out);
+    fprintf(stderr,"STAGE: native PNG\n");
     setPNG(owner,small,smallSize,0); again=fetch(png,&size);
     assert(size>=smallSize && !memcmp(small,again,smallSize)); free(again);
+    fprintf(stderr,"STAGE: mixed PNG and text\n");
     setPNG(owner,small,smallSize,1); assert(hasTarget(png) && hasTarget(utf8));
     text=fetch(utf8,&size); assert(size==9 && !memcmp(text,"hello \xce\xbb\n",9)); free(text);
+    fprintf(stderr,"STAGE: large bitmap\n");
     setDIB(owner,1024,1024); large=fetch(png,&largeSize); assert(largeSize>65536);
     verifyPNG(large,largeSize,1024,1024);
     out=fopen("build-tests/integration-large.png","wb"); assert(out);

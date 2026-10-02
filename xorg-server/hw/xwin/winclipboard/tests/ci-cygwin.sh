@@ -13,6 +13,7 @@ meson setup build-cygwin xorg-server -Dxwin=true -Dxorg=false -Dxwayland=false \
     -Dxkb_bin_dir=/usr/bin >build-tests/configure.log 2>&1
 ninja -C build-cygwin -j4 hw/xwin/winclipboard/clipboard-integration-test.exe \
     >build-tests/clipboard-build.log 2>&1
+export VCXSRV_TEST_VERBOSE=1
 export DISPLAY=:93
 export XAUTHORITY="$PWD/build-tests/Xauthority"
 # A private cookie; never print it in CI logs.
