@@ -453,6 +453,7 @@ winClipboardFlushXEvents(HWND hwnd,
                 size_t png_size = 0;
                 if (selection_request->selection == atomClipboard && OpenClipboard(hwnd)) {
                     png = winClipboardReadPNG(&png_size);
+                    winDebug("PNG clipboard snapshot: %lu bytes\n", (unsigned long)png_size);
                     CloseClipboard();
                 }
                 winClipboardSend(&atoms->outgoing, conn, selection_request,
