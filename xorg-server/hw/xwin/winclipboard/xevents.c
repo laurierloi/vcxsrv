@@ -34,7 +34,6 @@
 #include <xwin-config.h>
 #endif
 #include "winclipboard.h"
-#include "winglobals.h"
 #include "misc.h"
 #include "winmsg.h"
 #include <limits.h>
@@ -46,6 +45,7 @@
 
 #include "winclipboard.h"
 #include "internal.h"
+#include "winglobals.h"
 
 /*
  * Constants
@@ -410,6 +410,8 @@ winClipboardFlushXEvents(HWND hwnd,
     xcb_atom_t atomCompoundText = atoms->atomCompoundText;
     xcb_atom_t atomTargets = atoms->atomTargets;
 
+    winClipboardOutgoingExpire(&atoms->outgoing, conn, GetTickCount64());
+
     /* Process all pending events */
     xcb_generic_event_t *event;
     while ((event = xcb_poll_for_event(conn))) {
@@ -418,6 +420,8 @@ winClipboardFlushXEvents(HWND hwnd,
         char *pszConvertData = NULL;
         BOOL fAbort = FALSE;
         BOOL fCloseClipboard = FALSE;
+
+        winClipboardOutgoingEvent(&atoms->outgoing, conn, event, GetTickCount64());
 
         /* Branch on the event type */
         switch (event->response_type & ~0x80) {
@@ -428,6 +432,9 @@ winClipboardFlushXEvents(HWND hwnd,
             UINT codepage;
 
             xcb_selection_request_event_t *selection_request =  (xcb_selection_request_event_t *)event;
+            /* ICCCM permits old requestors to omit the reply property. */
+            if (selection_request->property == XCB_NONE)
+                selection_request->property = selection_request->target;
 #ifdef _DEBUG
         if (g_iLogVerbose >= 3)
         {
@@ -441,6 +448,18 @@ winClipboardFlushXEvents(HWND hwnd,
         }
 #endif
 
+            if (selection_request->target == atoms->atomPNG) {
+                unsigned char *png = NULL;
+                size_t png_size = 0;
+                if (selection_request->selection == atomClipboard && OpenClipboard(hwnd)) {
+                    png = winClipboardReadPNG(&png_size);
+                    CloseClipboard();
+                }
+                winClipboardSend(&atoms->outgoing, conn, selection_request,
+                                 atoms->atomIncr, png, png_size, GetTickCount64());
+                break;
+            }
+
             /* Abort if invalid target type */
             if (selection_request->target != XCB_ATOM_STRING
                 && selection_request->target != atomUTF8String
@@ -453,13 +472,16 @@ winClipboardFlushXEvents(HWND hwnd,
 
             /* Handle targets type of request */
             if (selection_request->target == atomTargets) {
-                xcb_atom_t atomTargetArr[] =
-                    {
-                     atomTargets,
-                     atomUTF8String,
-                     XCB_ATOM_STRING,
-                     // atomCompoundText, not implemented (yet?)
-                    };
+                xcb_atom_t atomTargetArr[4];
+                unsigned int nTargets = 0;
+                atomTargetArr[nTargets++] = atomTargets;
+                if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+                    atomTargetArr[nTargets++] = atomUTF8String;
+                    atomTargetArr[nTargets++] = XCB_ATOM_STRING;
+                }
+                if (selection_request->selection == atomClipboard &&
+                    atoms->atomPNG && winClipboardHasImage())
+                    atomTargetArr[nTargets++] = atoms->atomPNG;
 
                 /* Try to change the property */
                 xcb_void_cookie_t cookie = xcb_change_property_checked(conn,
@@ -468,7 +490,7 @@ winClipboardFlushXEvents(HWND hwnd,
                                           selection_request->property,
                                           XCB_ATOM_ATOM,
                                           32,
-                                          ARRAY_SIZE(atomTargetArr),
+                                          nTargets,
                                           (unsigned char *) atomTargetArr);
                 xcb_generic_error_t *error;
                 if ((error = xcb_request_check(conn, cookie))) {
@@ -726,13 +748,16 @@ winClipboardFlushXEvents(HWND hwnd,
                     ErrorF("winClipboardFlushXEvents - SelectionNotify - "
                            "Conversion to format %d refused.\n",
                            selection_notify->target);
+                    free(event);
                     return WIN_XEVENTS_FAILED;
                 }
 
             if (selection_notify->target == atomTargets) {
+              free(event);
               return winClipboardSelectionNotifyTargets(hwnd, iWindow, conn, data, atoms);
             }
 
+            free(event);
             return winClipboardSelectionNotifyData(hwnd, iWindow, conn, data, atoms);
         }
 
@@ -746,13 +771,17 @@ winClipboardFlushXEvents(HWND hwnd,
 
             /* If INCR is in progress, collect the data */
             if (data->incr &&
+                (property_notify->window == iWindow) &&
                 (property_notify->atom == atoms->atomLocalProperty) &&
-                (property_notify->state == XCB_PROPERTY_NEW_VALUE))
+                (property_notify->state == XCB_PROPERTY_NEW_VALUE)) {
+                free(event);
                 return winClipboardSelectionNotifyData(hwnd, iWindow, conn, data, atoms);
+            }
 
             break;
         }
 
+        case XCB_DESTROY_NOTIFY: /* Outgoing INCR cleanup handled above. */
         case XCB_MAPPING_NOTIFY:
             break;
 
@@ -838,6 +867,8 @@ winClipboardFlushXEvents(HWND hwnd,
             }
             break;
         }
+
+        free(event);
 
         /* I/O errors etc. */
         {

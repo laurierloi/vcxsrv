@@ -1,6 +1,8 @@
 srcs_windows_clipboard = [
     'winclipboard.h',
     'textconv.c',
+    'image.c',
+    'outgoing.c',
     'thread.c',
     'wndproc.c',
     'xevents.c',
@@ -9,7 +11,7 @@ srcs_windows_clipboard = [
 xwin_clipboard = static_library(
     'XWinclipboard',
     srcs_windows_clipboard,
-    include_directories: inc,
+    include_directories: [inc, include_directories('..')],
     c_args: '-DHAVE_XWIN_CONFIG_H',
     dependencies: [
         dependency('xcb'),
@@ -30,7 +32,7 @@ executable(
     srcs_xwinclip,
     dependencies: dependency('xcb'),
     link_with: xwin_clipboard,
-    link_args: ['-lgdi32', '-lpthread'],
+    link_args: ['-lgdi32', '-lpthread', '-lole32', '-lwindowscodecs'],
     install: true,
 )
 
@@ -40,3 +42,17 @@ xwinclip_man = configure_file(
     configuration: manpage_config,
 )
 install_man(xwinclip_man)
+
+# Explicit test target: never starts a server or accesses the user clipboard as
+# part of a normal build. Default runtime uses a separate Windows window station.
+executable(
+    'clipboard-integration-test',
+    'tests/integration-test.c',
+    include_directories: [inc, include_directories('..')],
+    c_args: '-DHAVE_XWIN_CONFIG_H',
+    dependencies: [dependency('xcb'), dependency('xcb-aux'),
+                   dependency('xcb-icccm'), dependency('xcb-xfixes')],
+    link_with: xwin_clipboard,
+    link_args: ['-lgdi32', '-lpthread', '-lole32', '-lwindowscodecs', '-luuid'],
+    build_by_default: false,
+)

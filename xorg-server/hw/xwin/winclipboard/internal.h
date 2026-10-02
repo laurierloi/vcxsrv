@@ -58,6 +58,8 @@ typedef int pid_t;
 #include <X11/Xwindows.h>
 
 #include "winmsg.h"
+#include "image.h"
+#include "outgoing.h"
 
 #define WIN_XEVENTS_SUCCESS			0  // more like 'CONTINUE'
 #define WIN_XEVENTS_FAILED			1
@@ -102,6 +104,8 @@ typedef struct
     xcb_atom_t atomCompoundText;
     xcb_atom_t atomTargets;
     xcb_atom_t atomIncr;
+    xcb_atom_t atomPNG;
+    ClipboardOutgoing outgoing;
 } ClipboardAtoms;
 
 /*

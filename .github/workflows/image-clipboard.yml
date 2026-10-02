@@ -1,0 +1,64 @@
+name: Image clipboard
+on:
+  push:
+    branches: [fix/image-clipboard]
+  pull_request:
+    paths:
+      - 'xorg-server/hw/xwin/winclipboard/**'
+      - '.github/workflows/image-clipboard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-image:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test real GDI/WIC conversion with MSVC
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          cl /nologo /W4 /WX /std:c11 /Od /Fe:image-test.exe xorg-server\hw\xwin\winclipboard\tests\image-test.c /link ole32.lib windowscodecs.lib gdi32.lib user32.lib uuid.lib
+          if errorlevel 1 exit /b 1
+          image-test.exe
+  x11-transfer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protocol test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev xvfb xauth
+      - name: Compile with sanitizers and test against Xvfb
+        run: |
+          cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined \
+            xorg-server/hw/xwin/winclipboard/tests/outgoing-test.c \
+            xorg-server/hw/xwin/winclipboard/outgoing.c -lxcb -o outgoing-test
+          xvfb-run -a ./outgoing-test
+  windows-integration:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated Cygwin build environment
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'setup-x86_64.exe'
+          Invoke-WebRequest https://cygwin.com/setup-x86_64.exe -OutFile $setup
+          $packages = 'gcc-core,meson,ninja,pkg-config,libX11-devel,libXau-devel,libXdmcp-devel,libxcb-devel,libxcb-util-devel,libxcb-icccm-devel,libxcb-image-devel,libxcb-ewmh-devel,libxcb-xfixes-devel,libxcb-composite-devel,libpixman1-devel,libXfont2-devel,libxkbfile-devel,xorgproto,xtrans,bison,flex,xkbcomp,xkeyboard-config,xauth,xorg-server'
+          $process = Start-Process -FilePath $setup -WindowStyle Hidden -Wait -PassThru -ArgumentList @('--quiet-mode','hidden','--no-admin','--no-shortcuts','--no-write-registry','--only-site','--site','https://mirrors.kernel.org/sourceware/cygwin/','--root','C:\cygwin64','--local-package-dir','C:\cygwin-packages','--packages',$packages)
+          if ($process.ExitCode -ne 0) { throw "Cygwin setup failed: $($process.ExitCode)" }
+      - name: Build the integrated clipboard target and exercise Windows clipboard events
+        shell: pwsh
+        run: |
+          $env:VCXSRV_SOURCE = $env:GITHUB_WORKSPACE.Replace('\','/')
+          & C:\cygwin64\bin\bash.exe --noprofile --norc -c 'export PATH=/usr/bin:$PATH; set -o igncr; export SHELLOPTS; cd "$VCXSRV_SOURCE"; bash xorg-server/hw/xwin/winclipboard/tests/ci-cygwin.sh'
+          if ($LASTEXITCODE -ne 0) { throw "Integration test failed: $LASTEXITCODE" }
+      - name: Keep build and acceptance logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-clipboard-integration
+          path: |
+            build-tests/*.log
+            build-tests/integration-*.png
+            build-cygwin/meson-logs/meson-log.txt
