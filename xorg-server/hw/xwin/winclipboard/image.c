@@ -6,12 +6,20 @@
 #include <objbase.h>
 #include <wincodec.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "image.h"
 #ifdef _MSC_VER
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #endif
+
+/* Diagnostics contain API names/error codes only, never clipboard bytes. */
+static void imageError(const char *operation, unsigned long error)
+{
+    if (getenv("VCXSRV_TEST_VERBOSE"))
+        fprintf(stderr, "clipboard image: %s failed (0x%08lx)\n", operation, error);
+}
 
 static UINT
 pngFormat(void)
@@ -55,11 +63,11 @@ bitmapPNG(HBITMAP source, size_t *size)
         dimensions.bmWidth <= 0 || dimensions.bmHeight <= 0 ||
         (unsigned long long)dimensions.bmWidth * dimensions.bmHeight >
         WIN_CLIPBOARD_IMAGE_LIMIT / 4u)
-        return NULL;
+        { imageError("bitmap dimensions", GetLastError()); return NULL; }
     init = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if (FAILED(init) && init != RPC_E_CHANGED_MODE)
-        return NULL;
-#define CHECK(call) do { hr = (call); if (FAILED(hr)) goto done; } while (0)
+        { imageError("CoInitializeEx", (unsigned long)init); return NULL; }
+#define CHECK(call) do { hr = (call); if (FAILED(hr)) { imageError(#call, (unsigned long)hr); goto done; } } while (0)
     CHECK(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IWICImagingFactory, (void **)&factory));
     /* DDB alpha is unspecified; treat bitmap-only screenshots as opaque.
