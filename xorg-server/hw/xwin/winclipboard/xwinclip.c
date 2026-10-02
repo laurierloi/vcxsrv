@@ -40,6 +40,19 @@
 #include <string.h>
 
 #include "winclipboard.h"
+#include "internal.h"
+#include "os/ddx_priv.h"
+
+/* Standalone host state normally supplied by the X server executable. */
+Bool g_fClipboardStarted = FALSE;
+Bool g_fClipboardLaunched = FALSE;
+HWND g_hwndClipboard = NULL;
+void *g_pClipboardDisplay = NULL;
+Window g_iClipboardWindow = 0;
+
+CARD32 GetTimeInMillis(void) { return GetTickCount(); }
+void ddxGiveUp(enum ExitCode error) { exit(error == EXIT_NO_ERROR ? 0 : 1); }
+
 
 /*
  * Main function
@@ -79,7 +92,6 @@ main (int argc, char *argv[])
       exit (1);
     }
 
-  winClipboardProc(pszDisplay, NULL /* Use XAUTHORITY for auth data */);
-
-  return 0;
+  return winClipboardProc(pszDisplay, NULL /* Use XAUTHORITY for auth data */)
+      ? EXIT_SUCCESS : EXIT_FAILURE;
 }

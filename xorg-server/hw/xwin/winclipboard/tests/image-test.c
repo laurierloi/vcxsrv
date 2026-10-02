@@ -108,10 +108,33 @@ static void checkBitmap(int width, int height, int bottom_up, int bitfields, int
     CoUninitialize();
 }
 
+static void checkInvalidDIB(void)
+{
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 144);
+    BITMAPV5HEADER *h = GlobalLock(memory);
+    size_t size;
+    assert(h);
+    h->bV5Size = 40; h->bV5Width = 8; h->bV5Height = 8;
+    h->bV5Planes = 1; h->bV5BitCount = 32;
+    GlobalUnlock(memory);
+    assert(!dibPNG(memory, &size) && !size); /* Truncated pixel buffer. */
+    h = GlobalLock(memory); h->bV5Width = 0x7fffffff; GlobalUnlock(memory);
+    assert(!dibPNG(memory, &size) && !size); /* Excessive dimensions. */
+    h = GlobalLock(memory); h->bV5Width = 1; h->bV5Height = 1;
+    h->bV5Size = sizeof(*h); h->bV5ProfileData = 0xffffffff;
+    h->bV5ProfileSize = 100; GlobalUnlock(memory);
+    assert(!dibPNG(memory, &size) && !size); /* Invalid profile extent. */
+    h = GlobalLock(memory); h->bV5ProfileData = h->bV5ProfileSize = 0;
+    h->bV5ClrUsed = 257; GlobalUnlock(memory);
+    assert(!dibPNG(memory, &size) && !size); /* Invalid palette. */
+    GlobalFree(memory);
+}
+
 int main(void)
 {
     size_t size=999;
     HGLOBAL bad;
+    checkInvalidDIB();
     checkBitmap(3, 2, 0, 0, 0);
     checkBitmap(3, 2, 1, 0, 0);
     checkBitmap(17, 13, 0, 1, 0);

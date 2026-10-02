@@ -12,7 +12,13 @@ meson setup build-cygwin xorg-server -Dxwin=true -Dxorg=false -Dxwayland=false \
     -Ddevel-docs=false -Dhyperv=false -Dxkb_dir=/usr/share/X11/xkb \
     -Dxkb_bin_dir=/usr/bin >build-tests/configure.log 2>&1
 ninja -C build-cygwin -j4 hw/xwin/winclipboard/clipboard-integration-test.exe \
+    hw/xwin/winclipboard/xwinclip.exe \
     >build-tests/clipboard-build.log 2>&1
+# A failed connection must exit nonzero before ever opening the clipboard.
+if ./build-cygwin/hw/xwin/winclipboard/xwinclip.exe -display :19999 \
+    >build-tests/xwinclip-invalid-display.log 2>&1; then
+    echo 'xwinclip accepted an unavailable display' >&2; exit 1
+fi
 export VCXSRV_TEST_VERBOSE=1
 export DISPLAY=:93
 export XAUTHORITY="$PWD/build-tests/Xauthority"

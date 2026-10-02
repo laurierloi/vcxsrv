@@ -142,6 +142,12 @@ dibPNG(HGLOBAL memory, size_t *size)
          header->biBitCount != 24 && header->biBitCount != 32) ||
         (header->biCompression != BI_RGB && header->biCompression != BI_BITFIELDS))
         goto done;
+    /* Embedded/linked profiles need separate bounds and color-management rules.
+     * Prefer Windows' CF_DIB synthesis for those rather than interpreting them.
+     */
+    if (header->biSize == sizeof(BITMAPV5HEADER) &&
+        (((BITMAPV5HEADER *)header)->bV5ProfileData ||
+         ((BITMAPV5HEADER *)header)->bV5ProfileSize)) goto done;
     if (header->biCompression == BI_BITFIELDS) {
         if (header->biBitCount != 16 && header->biBitCount != 32) goto done;
         if (header->biSize == 40) external_masks = 12;

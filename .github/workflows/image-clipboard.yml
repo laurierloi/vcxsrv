@@ -4,7 +4,7 @@ on:
     branches: [fix/image-clipboard]
   pull_request:
     paths:
-      - 'xorg-server/hw/xwin/winclipboard/**'
+      - 'xorg-server/hw/xwin/**'
       - '.github/workflows/image-clipboard.yml'
   workflow_dispatch:
 concurrency:
@@ -62,6 +62,7 @@ jobs:
         with:
           name: windows-clipboard-integration
           path: |
+            build-cygwin/hw/xwin/winclipboard/xwinclip.exe
             build-tests/*.log
             build-tests/integration-*.png
             build-cygwin/meson-logs/meson-log.txt

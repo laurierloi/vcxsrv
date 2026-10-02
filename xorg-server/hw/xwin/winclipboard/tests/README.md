@@ -59,6 +59,20 @@ An explicitly requested manual test may use `--serve-current-clipboard` to run
 the bridge without writing synthetic fixtures. Use an isolated authenticated X
 display: the bridge itself retains the normal bidirectional text clipboard behavior.
 
+The Meson `hw/xwin/winclipboard/xwinclip.exe` target builds a standalone bridge
+from the same library. With a compatible Cygwin runtime, it can connect to an
+existing authenticated X server started with its built-in clipboard disabled
+(`-noclipboard`):
+
+```sh
+DISPLAY=:93 XAUTHORITY=/path/to/private/Xauthority ./xwinclip.exe -noprimary
+```
+
+Run only one clipboard bridge per display. This is an alternative acceptance
+path; building this executable does not establish that the complete VcXsrv
+server or installer builds. The CI artifact includes the executable, but not
+its Cygwin runtime DLLs.
+
 ## End-to-end acceptance (separate from unit/protocol tests)
 
 1. Start a build containing this change with clipboard integration enabled and
