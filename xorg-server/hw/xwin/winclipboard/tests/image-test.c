@@ -6,11 +6,12 @@
 #include <stdio.h>
 #include "../image.c"
 
-static void checkBitmap(int width, int height, int bottom_up, int bitfields)
+static void checkBitmap(int width, int height, int bottom_up, int bitfields, int ddb)
 {
     BITMAPINFO *info = calloc(1, sizeof(BITMAPINFOHEADER) + 3 * sizeof(DWORD));
     unsigned char *pixels, *png;
-    size_t size;
+    size_t size, fallback_size;
+    unsigned char *fallback;
     HBITMAP bitmap;
     IWICImagingFactory *factory;
     IWICStream *stream;
@@ -39,8 +40,30 @@ static void checkBitmap(int width, int height, int bottom_up, int bitfields)
         pixels[offset+2] = (unsigned char)(x+y);
         pixels[offset+3] = 0; /* Unspecified DDB alpha must not make it transparent. */
     }
+    /* Exercise the bounded fallback without accessing the desktop clipboard. */
+    {
+        size_t masks = bitfields ? 12 : 0;
+        size_t length = sizeof(BITMAPINFOHEADER) + masks + (size_t)width*height*4;
+        HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, length);
+        unsigned char *bytes = GlobalLock(mem);
+        assert(bytes);
+        memcpy(bytes, info, sizeof(BITMAPINFOHEADER) + masks);
+        memcpy(bytes + sizeof(BITMAPINFOHEADER) + masks, pixels, (size_t)width*height*4);
+        GlobalUnlock(mem);
+        fallback = dibPNG(mem, &fallback_size);
+        assert(fallback && fallback_size > 8); GlobalFree(mem);
+    }
+    if (ddb) {
+        HDC dc = GetDC(NULL);
+        HBITMAP device = CreateDIBitmap(dc, &info->bmiHeader, CBM_INIT,
+                                       pixels, info, DIB_RGB_COLORS);
+        assert(device); ReleaseDC(NULL, dc); DeleteObject(bitmap); bitmap = device;
+    }
+    /* The conversion must initialize COM itself, including on a fresh thread. */
     png = bitmapPNG(bitmap, &size);
     assert(png && size > 8);
+    assert(size == fallback_size && !memcmp(png, fallback, size)); free(fallback);
+    assert(SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED)));
     assert(SUCCEEDED(CoCreateInstance(&CLSID_WICImagingFactory, NULL,
         CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (void **)&factory)));
     assert(SUCCEEDED(IWICImagingFactory_CreateStream(factory, &stream)));
@@ -82,22 +105,24 @@ static void checkBitmap(int width, int height, int bottom_up, int bitfields)
     IWICBitmapDecoder_Release(decoder);
     IWICStream_Release(stream);
     IWICImagingFactory_Release(factory);
+    CoUninitialize();
 }
 
 int main(void)
 {
     size_t size=999;
     HGLOBAL bad;
-    assert(SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED)));
-    checkBitmap(3, 2, 0, 0);
-    checkBitmap(3, 2, 1, 0);
-    checkBitmap(17, 13, 0, 1);
-    checkBitmap(1920, 1080, 1, 1);
+    checkBitmap(3, 2, 0, 0, 0);
+    checkBitmap(3, 2, 1, 0, 0);
+    checkBitmap(17, 13, 0, 1, 0);
+    checkBitmap(1920, 1080, 1, 1, 0);
+    checkBitmap(3, 2, 0, 0, 1);
     assert(!bitmapPNG(NULL, &size) && size == 0);
     assert(!copyPNG(NULL, &size) && size == 0);
+    assert(!dibPNG(NULL, &size) && size == 0);
     bad=GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 32);
-    assert(!copyPNG(bad,&size) && size==0); GlobalFree(bad);
-    CoUninitialize();
+    assert(!copyPNG(bad,&size) && size==0);
+    assert(!dibPNG(bad,&size) && size==0); GlobalFree(bad);
     puts("PASS: bitmap colors, orientation, BI_BITFIELDS, opaque alpha, 1080p, PNG byte preservation, invalid input");
     return 0;
 }

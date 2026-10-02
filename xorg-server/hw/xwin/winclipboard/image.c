@@ -58,7 +58,7 @@ bitmapPNG(HBITMAP source, size_t *size)
     WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
 
     *size = 0;
-    if (!source) { imageError("GetClipboardData(CF_BITMAP)", GetLastError()); return NULL; }
+    if (!source) return NULL;
     if (GetObject(source, sizeof(dimensions), &dimensions) != sizeof(dimensions) ||
         dimensions.bmWidth <= 0 || dimensions.bmHeight <= 0 ||
         (unsigned long long)dimensions.bmWidth * dimensions.bmHeight >
@@ -114,6 +114,63 @@ done:
 #undef CHECK
 }
 
+/* Some clipboard producers/session types cannot synthesize CF_BITMAP. Validate
+ * every accessed byte before asking GDI to create a bitmap from an unpacked DIB.
+ * Compressed/RLE DIBs still use the normal Windows synthesis path above.
+ */
+static unsigned char *
+dibPNG(HGLOBAL memory, size_t *size)
+{
+    size_t length = memory ? GlobalSize(memory) : 0;
+    BITMAPINFOHEADER *header;
+    unsigned char *result = NULL;
+    unsigned long long height, stride, offset, pixels;
+    DWORD colors, external_masks = 0;
+    HDC dc;
+    HBITMAP bitmap;
+    *size = 0;
+    if (length < sizeof(BITMAPINFOHEADER) || length > WIN_CLIPBOARD_IMAGE_LIMIT)
+        return NULL;
+    header = GlobalLock(memory);
+    if (!header) return NULL;
+    if ((header->biSize != 40 && header->biSize != 52 && header->biSize != 56 &&
+         header->biSize != 108 && header->biSize != 124) ||
+        header->biSize > length || header->biWidth <= 0 || !header->biHeight ||
+        header->biPlanes != 1 ||
+        (header->biBitCount != 1 && header->biBitCount != 4 &&
+         header->biBitCount != 8 && header->biBitCount != 16 &&
+         header->biBitCount != 24 && header->biBitCount != 32) ||
+        (header->biCompression != BI_RGB && header->biCompression != BI_BITFIELDS))
+        goto done;
+    if (header->biCompression == BI_BITFIELDS) {
+        if (header->biBitCount != 16 && header->biBitCount != 32) goto done;
+        if (header->biSize == 40) external_masks = 12;
+    }
+    height = header->biHeight < 0 ? -(long long)header->biHeight : header->biHeight;
+    if ((unsigned long long)header->biWidth * height > WIN_CLIPBOARD_IMAGE_LIMIT / 4u)
+        goto done;
+    colors = header->biClrUsed;
+    if (colors > 256 || (header->biBitCount <= 8 && colors > (1u << header->biBitCount)))
+        goto done;
+    if (!colors && header->biBitCount <= 8) colors = 1u << header->biBitCount;
+    offset = header->biSize + external_masks + (unsigned long long)colors * 4;
+    stride = (((unsigned long long)header->biWidth * header->biBitCount + 31) / 32) * 4;
+    pixels = stride * height;
+    if (offset > length || pixels > length - offset) goto done;
+    dc = GetDC(NULL);
+    if (!dc) goto done;
+    bitmap = CreateDIBitmap(dc, header, CBM_INIT, (unsigned char *)header + offset,
+                           (BITMAPINFO *)header, DIB_RGB_COLORS);
+    ReleaseDC(NULL, dc);
+    if (bitmap) {
+        result = bitmapPNG(bitmap, size);
+        DeleteObject(bitmap);
+    } else imageError("CreateDIBitmap", GetLastError());
+done:
+    GlobalUnlock(memory);
+    return result;
+}
+
 static unsigned char *
 copyPNG(HGLOBAL memory, size_t *size)
 {
@@ -146,5 +203,9 @@ winClipboardReadPNG(size_t *size)
     if (png && IsClipboardFormatAvailable(png))
         result = copyPNG(GetClipboardData(png), size);
     if (result) return result;
-    return bitmapPNG((HBITMAP)GetClipboardData(CF_BITMAP), size);
+    result = bitmapPNG((HBITMAP)GetClipboardData(CF_BITMAP), size);
+    if (result) return result;
+    result = dibPNG(GetClipboardData(CF_DIB), size);
+    if (result) return result;
+    return dibPNG(GetClipboardData(CF_DIBV5), size);
 }

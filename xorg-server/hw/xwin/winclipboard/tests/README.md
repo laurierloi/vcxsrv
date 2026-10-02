@@ -9,7 +9,9 @@ X11 -> Windows image conversion and does not close every case in upstream issue
 - Advertise `image/png` when Windows has a PNG, bitmap, DIB, or DIBV5.
 - Copy the registered Windows `PNG` format unchanged, preserving transparency.
 - Otherwise ask Windows for its synthesized bitmap and encode it with WIC.
-  Bitmap-only copies are opaque because Windows DDB alpha is unspecified.
+  If automatic bitmap synthesis fails, validate an uncompressed DIB buffer and
+  create a GDI bitmap directly. Bitmap-only copies are opaque because Windows
+  DDB alpha is unspecified.
 - Keep image-only copies out of `PRIMARY` (middle-click text paste).
 - Preserve text targets when the clipboard contains both text and an image.
 - Snapshot and close the Windows clipboard before sending over X11/SSH.
