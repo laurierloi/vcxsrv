@@ -169,6 +169,10 @@ static void setDIB(HWND owner,int width,int height)
     BITMAPINFOHEADER *b=GlobalLock(h); unsigned char *p; int x,y;
     assert(b); b->biSize=sizeof(*b); b->biWidth=width; b->biHeight=-height;
     b->biPlanes=1; b->biBitCount=32; b->biCompression=BI_RGB;
+    b->biSizeImage=(DWORD)((size_t)width*height*4);
+    fprintf(stderr,"DIB fixture: header=%lu width=%ld height=%ld planes=%u bpp=%u bytes=%lu allocation=%zu\n",
+        (unsigned long)b->biSize,(long)b->biWidth,(long)b->biHeight,b->biPlanes,b->biBitCount,
+        (unsigned long)b->biSizeImage,size);
     p=(unsigned char *)(b+1);
     for(y=0;y<height;++y)for(x=0;x<width;++x) {
         size_t o=((size_t)y*width+x)*4;

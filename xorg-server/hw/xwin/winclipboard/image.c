@@ -58,7 +58,8 @@ bitmapPNG(HBITMAP source, size_t *size)
     WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
 
     *size = 0;
-    if (!source || GetObject(source, sizeof(dimensions), &dimensions) != sizeof(dimensions) ||
+    if (!source) { imageError("GetClipboardData(CF_BITMAP)", GetLastError()); return NULL; }
+    if (GetObject(source, sizeof(dimensions), &dimensions) != sizeof(dimensions) ||
         dimensions.bmWidth <= 0 || dimensions.bmHeight <= 0 ||
         (unsigned long long)dimensions.bmWidth * dimensions.bmHeight >
         WIN_CLIPBOARD_IMAGE_LIMIT / 4u)
