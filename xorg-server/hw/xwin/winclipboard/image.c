@@ -17,7 +17,7 @@
 /* Diagnostics contain API names/error codes only, never clipboard bytes. */
 static void imageError(const char *operation, unsigned long error)
 {
-    if (getenv("VCXSRV_TEST_VERBOSE"))
+    if (GetEnvironmentVariableA("VCXSRV_TEST_VERBOSE", NULL, 0))
         fprintf(stderr, "clipboard image: %s failed (0x%08lx)\n", operation, error);
 }
 
