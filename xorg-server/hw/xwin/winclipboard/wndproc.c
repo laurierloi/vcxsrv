@@ -39,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <limits.h>
+#include <errno.h>
 
 #include <xcb/xproto.h>
 #include <xcb/xcb_aux.h>
@@ -124,8 +125,13 @@ winProcessXEventsTimeout(HWND hwnd, xcb_window_t iWindow, xcb_connection_t *conn
                          NULL,  /* No exception mask */
                          &tv);  /* Timeout */
         if (iReturn < 0) {
+#ifdef HAS_WINSOCK
+            int select_error = WSAGetLastError();
+#else
+            int select_error = errno;
+#endif
             ErrorF("winProcessXEventsTimeout - Call to select () failed: %d (%x).  "
-                   "Bailing.\n", iReturn, WSAGetLastError());
+                   "Bailing.\n", iReturn, select_error);
             break;
         }
         else if (iReturn == 0)
@@ -214,18 +220,18 @@ winClipboardWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         /*
          * Do not take ownership of the X11 selections when something
-         * other than CF_TEXT or CF_UNICODETEXT has been copied
+         * other than text or a supported image has been copied
          * into the Win32 clipboard.
          */
         if (!IsClipboardFormatAvailable(CF_TEXT)
-            && !IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+            && !IsClipboardFormatAvailable(CF_UNICODETEXT)
+            && !winClipboardHasImage()) {
 
             xcb_get_selection_owner_cookie_t cookie_get;
             xcb_get_selection_owner_reply_t *reply;
 
             winDebug("winClipboardWindowProc - WM_CLIPBOARDUPDATE - "
-                     "Clipboard does not contain CF_TEXT nor "
-                     "CF_UNICODETEXT.\n");
+                     "Clipboard does not contain supported text or image data.\n");
 
             /*
              * We need to make sure that the X Server has processed
@@ -264,8 +270,17 @@ winClipboardWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
 
-        /* Reassert ownership of PRIMARY */
-        cookie_set = xcb_set_selection_owner_checked(conn, iWindow, XCB_ATOM_PRIMARY, XCB_CURRENT_TIME);
+        /* Keep image-only copies out of PRIMARY (middle-click text paste). */
+        if (fPrimarySelection && IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+            cookie_set = xcb_set_selection_owner_checked(conn, iWindow, XCB_ATOM_PRIMARY, XCB_CURRENT_TIME);
+        } else {
+            xcb_get_selection_owner_reply_t *owner = xcb_get_selection_owner_reply(
+                conn, xcb_get_selection_owner(conn, XCB_ATOM_PRIMARY), NULL);
+            if (owner && owner->owner == iWindow)
+                xcb_set_selection_owner(conn, XCB_NONE, XCB_ATOM_PRIMARY, XCB_CURRENT_TIME);
+            free(owner);
+            goto clipboard_owner;
+        }
         error = xcb_request_check(conn, cookie_set);
         if (error) {
             ErrorF("winClipboardWindowProc - WM_CLIPBOARDUPDATE - "
@@ -276,6 +291,7 @@ winClipboardWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
                      "Reasserted ownership of PRIMARY\n");
         }
 
+clipboard_owner:
         /* Reassert ownership of the CLIPBOARD */
         cookie_set = xcb_set_selection_owner_checked(conn, iWindow, atoms->atomClipboard, XCB_CURRENT_TIME);
         error = xcb_request_check(conn, cookie_set);

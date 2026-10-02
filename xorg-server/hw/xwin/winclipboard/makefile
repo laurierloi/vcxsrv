@@ -1,6 +1,8 @@
 LIBRARY = libXWinclipboard
 
 CSRCS = \
+	image.c \
+	outgoing.c \
 	textconv.c \
 	thread.c \
 	wndproc.c \

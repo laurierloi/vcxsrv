@@ -41,6 +41,7 @@
 #include <pthread.h>
 #include "windisplay.h"
 #include "misc.h"
+#include "os/ddx_priv.h"
 #include "winmsg.h"
 
 #include <xcb/xcb.h>
@@ -123,15 +124,14 @@ winClipboardThreadExit(void *arg);
 BOOL
 winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
 {
-    ClipboardAtoms atoms;
+    ClipboardAtoms atoms = {0};
     int iReturn;
     HWND hwnd = NULL;
     int iConnectionNumber = 0;
 #ifdef HAS_DEVWINDOWS
     int fdMessageQueue = 0;
-#else
-    struct timeval tvTimeout;
 #endif
+    struct timeval tvTimeout;
     fd_set fdsRead;
     int iMaxDescriptor;
     xcb_connection_t *conn;
@@ -170,7 +170,7 @@ winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
     }
 
     /* Find max of our file descriptors */
-    iMaxDescriptor = MAX(fdMessageQueue, iConnectionNumber) + 1;
+    iMaxDescriptor = (fdMessageQueue > iConnectionNumber ? fdMessageQueue : iConnectionNumber) + 1;
 #else
     iMaxDescriptor = iConnectionNumber + 1;
 #endif
@@ -191,6 +191,7 @@ winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
     atoms.atomCompoundText = intern_atom(conn, "COMPOUND_TEXT");
     atoms.atomTargets = intern_atom(conn, "TARGETS");
     atoms.atomIncr = intern_atom(conn, "INCR");
+    atoms.atomPNG = intern_atom(conn, "image/png");
 
     xcb_screen_t *root_screen = xcb_aux_get_screen(conn, screen);
     xcb_window_t root_window_id = root_screen->root;
@@ -250,24 +251,8 @@ winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
     /* Save copy of HWND */
     g_hwndClipboard = hwnd;
 
-    /* Assert ownership of selections if Win32 clipboard is owned */
-    if (NULL != GetClipboardOwner()) {
-        /* PRIMARY */
-        cookie = xcb_set_selection_owner_checked(conn, iWindow, XCB_ATOM_PRIMARY, XCB_CURRENT_TIME);
-        if ((error = xcb_request_check(conn, cookie))) {
-            ErrorF("winClipboardProc - Could not set PRIMARY owner\n");
-            free(error);
-            goto thread_errorexit;
-        }
-
-        /* CLIPBOARD */
-        cookie = xcb_set_selection_owner_checked(conn, iWindow, atoms.atomClipboard, XCB_CURRENT_TIME);
-        if ((error = xcb_request_check(conn, cookie))) {
-            ErrorF("winClipboardProc - Could not set CLIPBOARD owner\n");
-            free(error);
-            goto thread_errorexit;
-        }
-    }
+    /* Apply the same text/image ownership policy to initial contents and updates. */
+    PostMessage(hwnd, WM_CLIPBOARDUPDATE, 0, 0);
 
     data.incr = NULL;
     data.incrsize = 0;
@@ -301,6 +286,8 @@ winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
         FD_SET(iConnectionNumber, &fdsRead);
 #ifdef HAS_DEVWINDOWS
         FD_SET(fdMessageQueue, &fdsRead);
+        tvTimeout.tv_sec = 1;
+        tvTimeout.tv_usec = 0;
 #else
         tvTimeout.tv_sec = 0;
         tvTimeout.tv_usec = 100;
@@ -311,11 +298,7 @@ winClipboardProc(char *szDisplay, xcb_auth_info_t *auth_info)
                          &fdsRead,      /* Read mask */
                          NULL,  /* No write mask */
                          NULL,  /* No exception mask */
-#ifdef HAS_DEVWINDOWS
-                         NULL   /* No timeout */
-#else
-                         &tvTimeout     /* Set timeout */
-#endif
+                         &tvTimeout     /* Also expire abandoned INCR transfers. */
             );
 
 #ifndef HAS_WINSOCK
@@ -388,6 +371,8 @@ thread_errorexit:
     winDebug ("Clipboard thread died.\n");
 
 commonexit:
+    /* No X requests during shutdown: the server may be waiting for us. */
+    winClipboardOutgoingClear(&atoms.outgoing, NULL);
     g_iClipboardWindow = None;
     g_pClipboardDisplay = NULL;
     g_fClipboardLaunched = FALSE;
