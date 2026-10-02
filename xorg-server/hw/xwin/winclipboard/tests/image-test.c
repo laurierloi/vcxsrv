@@ -127,6 +127,9 @@ static void checkInvalidDIB(void)
     h = GlobalLock(memory); h->bV5ProfileData = h->bV5ProfileSize = 0;
     h->bV5ClrUsed = 257; GlobalUnlock(memory);
     assert(!dibPNG(memory, &size) && !size); /* Invalid palette. */
+    h = GlobalLock(memory); h->bV5ClrUsed = 0; h->bV5SizeImage = 0xffffffff;
+    GlobalUnlock(memory);
+    assert(!dibPNG(memory, &size) && !size); /* Claimed data exceeds allocation. */
     GlobalFree(memory);
 }
 

@@ -162,7 +162,8 @@ dibPNG(HGLOBAL memory, size_t *size)
     offset = header->biSize + external_masks + (unsigned long long)colors * 4;
     stride = (((unsigned long long)header->biWidth * header->biBitCount + 31) / 32) * 4;
     pixels = stride * height;
-    if (offset > length || pixels > length - offset) goto done;
+    if (offset > length || pixels > length - offset ||
+        (header->biSizeImage && header->biSizeImage != pixels)) goto done;
     dc = GetDC(NULL);
     if (!dc) goto done;
     bitmap = CreateDIBitmap(dc, header, CBM_INIT, (unsigned char *)header + offset,
